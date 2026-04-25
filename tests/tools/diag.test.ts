@@ -2,22 +2,23 @@ import { describe, it, expect, vi } from "vitest";
 import { diagToolDefinitions, handleDiagTool } from "../../src/tools/diag.js";
 
 describe("synology_diag_disk_health", () => {
-  it("calls HddMan/load_all_disk_list", async () => {
-    const client = { hostname: "nas01", request: vi.fn(async () => ({ disks: [] })) };
-    await handleDiagTool("synology_diag_disk_health", { host: "nas01" }, { clientFor: async () => client as never });
-    const [api, method] = client.request.mock.calls[0] as [string, string];
-    expect(api).toBe("SYNO.Storage.CGI.HddMan");
-    expect(method).toBe("load_all_disk_list");
+  it("calls SYNO.Storage.CGI.Storage/load_info and returns disks", async () => {
+    const client = { hostname: "nas01", request: vi.fn(async () => ({ disks: [{ id: "sata1", smart_status: "normal" }] })) };
+    const result = await handleDiagTool("synology_diag_disk_health", { host: "nas01" }, { clientFor: async () => client as never });
+    expect(client.request).toHaveBeenCalledWith("SYNO.Storage.CGI.Storage", "load_info", { version: 1 });
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.disks[0].id).toBe("sata1");
   });
 });
 
 describe("synology_diag_smart", () => {
-  it("calls Smart/list version=2", async () => {
-    const client = { hostname: "nas01", request: vi.fn(async () => ({ smart: [] })) };
-    await handleDiagTool("synology_diag_smart", { host: "nas01" }, { clientFor: async () => client as never });
-    const [api, method, params] = client.request.mock.calls[0] as [string, string, Record<string, unknown>];
-    expect(api).toBe("SYNO.Storage.CGI.Smart");
-    expect(params.version).toBe(2);
+  it("returns rolled-up smart_status from disks array", async () => {
+    const client = { hostname: "nas01", request: vi.fn(async () => ({ disks: [{ id: "sata1", smart_status: "normal", temp: 30, model: "X", serial: "Y" }] })) };
+    const result = await handleDiagTool("synology_diag_smart", { host: "nas01" }, { clientFor: async () => client as never });
+    expect(client.request).toHaveBeenCalledWith("SYNO.Storage.CGI.Storage", "load_info", { version: 1 });
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.smart_summary).toHaveLength(1);
+    expect(parsed.smart_summary[0].smart_status).toBe("normal");
   });
 });
 

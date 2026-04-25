@@ -12,10 +12,10 @@ describe("synology_network_interfaces", () => {
 });
 
 describe("synology_network_routes", () => {
-  it("calls SYNO.Core.Network.Route/list", async () => {
-    const client = { hostname: "nas01", request: vi.fn(async () => ({ routes: [] })) };
+  it("calls SYNO.Core.Network/get v2", async () => {
+    const client = { hostname: "nas01", request: vi.fn(async () => ({ gateway: "10.10.0.1", dns_primary: "10.10.0.1" })) };
     await handleNetworkTool("synology_network_routes", { host: "nas01" }, { clientFor: async () => client as never });
-    expect(client.request).toHaveBeenCalledWith("SYNO.Core.Network.Route", "list", { version: 1 });
+    expect(client.request).toHaveBeenCalledWith("SYNO.Core.Network", "get", { version: 2 });
   });
 });
 
