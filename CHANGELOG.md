@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here. Format: [CalVer](https://calver.org/) — `YYYY.MM.DD.N`.
 
+## v2026.04.25.1
+
+### feat(skills): add /synology-test + /synology-health + /synology-inventory skills (#5)
+
+Three operational skills shipped with mcp-synology:
+- `/synology-test <host>` — live-test every read-only tool, report to Slack
+- `/synology-health [host]` — traffic-light health dashboard
+- `/synology-inventory <host>` — full Markdown inventory report
+
 ## v2026.04.23.1
 
 ### Initial release (#1)
