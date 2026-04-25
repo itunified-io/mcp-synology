@@ -18,7 +18,7 @@ export const networkToolDefinitions = [
   },
   {
     name: "synology_network_routes",
-    description: "List IPv4/IPv6 routing table entries on this Synology host.",
+    description: "Default gateway, IPv6 gateway, DNS servers, and global network config. Source: SYNO.Core.Network/get v2. (Static route table not exposed to non-root API users in DSM 7.2.)",
     inputSchema: { type: "object", properties: { host: { type: "string" } }, required: ["host"], additionalProperties: false } as const,
   },
 ];
@@ -31,14 +31,15 @@ export async function handleNetworkTool(
   try {
     const { host } = HostInputSchema.parse(args);
     const client = await ctx.clientFor(host);
-    const apiByName: Record<string, { api: string; method: string }> = {
-      synology_network_interfaces: { api: "SYNO.Core.Network.Interface", method: "list" },
-      synology_network_routes: { api: "SYNO.Core.Network.Route", method: "list" },
-    };
-    const spec = apiByName[name];
-    if (!spec) throw new Error(`Unknown tool: ${name}`);
-    const data = await client.request(spec.api, spec.method, { version: 1 });
-    return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    if (name === "synology_network_interfaces") {
+      const data = await client.request("SYNO.Core.Network.Interface", "list", { version: 1 });
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+    if (name === "synology_network_routes") {
+      const data = await client.request("SYNO.Core.Network", "get", { version: 2 });
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    }
+    throw new Error(`Unknown tool: ${name}`);
   } catch (err) {
     return formatDsmError(err);
   }
