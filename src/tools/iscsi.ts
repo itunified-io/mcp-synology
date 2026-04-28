@@ -23,7 +23,8 @@ export const iscsiToolDefinitions = [
   },
   {
     name: "synology_iscsi_initiator_acl_list",
-    description: "List each iSCSI target with its allowed_hosts initiator ACL entries.",
+    description:
+      "List each iSCSI LUN with its bound initiator ACL entries (DSM 7.x per-LUN model). Returns LUNs with an 'acls' array of {iqn, permission} entries.",
     inputSchema: { type: "object", properties: { host: { type: "string" } }, required: ["host"], additionalProperties: false } as const,
   },
 ];
@@ -45,9 +46,17 @@ export async function handleIscsiTool(
         data = await client.request("SYNO.Core.ISCSI.LUN", "list", { version: 1 });
         break;
       case "synology_iscsi_initiator_acl_list":
-        data = await client.request("SYNO.Core.ISCSI.Target", "list", {
+        // DSM 7.x: ACLs are per-LUN, not per-target. The DSM 6.x global "host"
+        // model (and the corresponding `allowed_hosts` additional flag on
+        // SYNO.Core.ISCSI.Target.list) was removed — Target.list with that flag
+        // silently returns no ACL data on DSM 7.x. The working surface is
+        // SYNO.Core.ISCSI.LUN.list with `additional=["acls"]`, which returns
+        // each LUN with a populated `acls: [{iqn, permission}, ...]` array.
+        // See itunified-io/mcp-synology#9 and the per-LUN write-side fix in
+        // itunified-io/mcp-synology-enterprise#2 (v2026.4.28-3).
+        data = await client.request("SYNO.Core.ISCSI.LUN", "list", {
           version: 1,
-          additional: JSON.stringify(["allowed_hosts"]),
+          additional: JSON.stringify(["acls"]),
         });
         break;
       default:

@@ -2,6 +2,47 @@
 
 All notable changes to this project are documented here. Format: [CalVer](https://calver.org/) — `YYYY.MM.DD.N`.
 
+## v2026.4.28-1
+
+### Fixed: synology_iscsi_initiator_acl_list returned no ACL data on DSM 7.x (#9)
+
+Live test on nas01 (DSM 7.x) confirmed the tool was silently broken: it called
+`SYNO.Core.ISCSI.Target.list` with `additional=["allowed_hosts"]`, which is
+the DSM 6.x global "host" allowlist model. DSM 7.x removed that — ACLs moved
+to a **per-LUN** model. The old call returned the same target list as
+`synology_iscsi_target_list` with no ACL fields whatsoever.
+
+Empirical probe (committed in `scripts/probe-acl.ts`) tried multiple
+`additional` values across both `Target.list` and `LUN.list`. The winning
+combination on DSM 7.x is:
+
+```ts
+client.request("SYNO.Core.ISCSI.LUN", "list", {
+  additional: JSON.stringify(["acls"]),
+})
+```
+
+Returns each LUN with a populated `acls: [{iqn, permission}, ...]` array,
+including the default open-policy entry plus any per-initiator ACLs bound via
+`synology_iscsi_initiator_acl_add` (mcp-synology-enterprise v2026.4.28-3+).
+
+### Changed (response shape)
+
+`synology_iscsi_initiator_acl_list` now returns `{ luns: [...] }` (each LUN
+with an `acls` array) instead of `{ targets: [...] }` (which never carried
+ACL data anyway). Tool description updated to match.
+
+### Verified live
+
+End-to-end test on nas01 with mcp-synology-enterprise v2026.4.28-3 setting
+the ACL → mcp-synology v2026.4.28-1 listing it back → MCP-driven, both sides
+working.
+
+### Cross-refs
+
+- itunified-io/mcp-synology-enterprise#2 (write-side per-LUN fix, v2026.4.28-3)
+- itunified-io/infrastructure#439 (live verification meta-issue)
+
 ## v2026.4.25-1
 
 ### Phase 1.1: re-pin DSM API paths for DSM 7.2 (#7)
