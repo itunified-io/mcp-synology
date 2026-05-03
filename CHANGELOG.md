@@ -2,6 +2,48 @@
 
 All notable changes to this project are documented here. Format: [CalVer](https://calver.org/) — `YYYY.MM.DD.N`.
 
+## v2026.5.3-3
+
+### Fixed: File Station tools now match real DSM 7.x response shapes (#12 v2)
+
+`v2026.5.3-2` corrected method names but assumed the wrong API for stat and
+mis-encoded the permission field. Live probing against `nas01` (DSM 7.2,
+2026-05-03) revealed the actual shapes:
+
+- **`file_stat`** — `SYNO.FileStation.Info.get` is the FileStation
+  *user-session* endpoint (returns `{uid, hostname, items, ...}`); it has
+  nothing to do with file metadata. The correct endpoint on DSM 7.x is
+  `SYNO.FileStation.List.getinfo`. Discovered via `SYNO.API.Info` enumeration —
+  `SYNO.FileStation.GetInfo` does **not** exist on DSM 7.x.
+- **Missing-path detection** — `List.getinfo` does **not** raise DSM error 408
+  for missing paths. It returns a placeholder entry with empty `name` and no
+  `additional` block. We now detect that and return `{exists:false}` cleanly.
+- **`mode` formatting** — DSM returns `posix` as the literal decimal of the
+  octal digits (e.g. `posix: 777` for `0o777`), not as the value of `0o777`.
+  The previous `(perm).toString(8)` produced `"1411"` for `777`. Now passes
+  the value through unchanged with zero-padding.
+- **`file_md5` 599 tolerance** — DSM returns error 599 ("Unknown DSM error")
+  on `status` polls when another MD5 task is in flight on the same session,
+  and *also* on any poll after a task reports `finished:true`. We now treat
+  599 from `status` as transient and keep polling until either a real
+  finished result or the per-call timeout (default 300s). The arbitrary
+  1500ms initial-delay-before-first-poll has been removed — clean cycles
+  complete in ~1s for a 72MB file.
+
+### Live verification (2026-05-03, nas01 DSM 7.2)
+
+- `synology_share_file_stat /software/oracle/19/opatch/12.2.0.1.47/p6880880_190000_Linux-x86-64.zip`
+  → `exists:true, size:72847006, mtime:1753730601, mode:"777", owner:"itsec"`
+- `synology_share_file_md5` (same path)
+  → `c6d2d850687528ccf943c4acdfc758c4` (completes in ~1s)
+- Missing path → `{exists:false}` (no error)
+
+### Tests
+
+83 unit tests pass. Added: 599-tolerance poll test, missing-path placeholder
+detection test. Updated: stat test now expects `SYNO.FileStation.List.getinfo`
+and `posix: 644` (decimal-of-octal, not `0o644`).
+
 ## v2026.5.3-2
 
 ### Fixed: File Station path-handling bugs (#12)

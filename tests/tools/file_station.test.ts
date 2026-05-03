@@ -33,7 +33,7 @@ describe("synology_share_file_stat", () => {
             additional: {
               size: 12345,
               time: { mtime: 1700000000 },
-              perm: { posix: 0o644 },
+              perm: { posix: 644 },
               owner: { user: "root", group: "users" },
             },
           },
@@ -58,8 +58,8 @@ describe("synology_share_file_stat", () => {
       path: "/software/oracle/foo.zip",
     });
     const [api, method, params] = client.request.mock.calls[0] as [string, string, Record<string, unknown>];
-    expect(api).toBe("SYNO.FileStation.Info");
-    expect(method).toBe("get");
+    expect(api).toBe("SYNO.FileStation.List");
+    expect(method).toBe("getinfo");
     expect(params.version).toBe(2);
     expect(params.path).toBe(JSON.stringify(["/software/oracle/foo.zip"]));
   });
@@ -68,7 +68,7 @@ describe("synology_share_file_stat", () => {
     const client = {
       hostname: "nas01",
       request: vi.fn(async () => {
-        throw new Error("DSM error 408 on SYNO.FileStation.Info/get for nas01");
+        throw new Error("DSM error 408 on SYNO.FileStation.List/getinfo for nas01");
       }),
     };
     const result = await handleFileStationTool(
@@ -77,6 +77,22 @@ describe("synology_share_file_stat", () => {
       { clientFor: async () => client as never },
     );
     expect(result.isError).toBeUndefined();
+    expect(JSON.parse(result.content[0]!.text)).toEqual({ exists: false });
+  });
+
+  it("returns {exists:false} on placeholder entry (DSM 7.x missing-path response)", async () => {
+    // DSM 7.x `List.getinfo` returns a stub entry {name:"", path:"/...", isdir:false} for missing paths.
+    const client = {
+      hostname: "nas01",
+      request: vi.fn(async () => ({
+        files: [{ name: "", path: "/software/missing.zip", isdir: false }],
+      })),
+    };
+    const result = await handleFileStationTool(
+      "synology_share_file_stat",
+      { host: "nas01", share: "software", path: "missing.zip" },
+      { clientFor: async () => client as never },
+    );
     expect(JSON.parse(result.content[0]!.text)).toEqual({ exists: false });
   });
 
@@ -182,29 +198,31 @@ describe("synology_share_file_md5", () => {
     expect("file_path" in first).toBe(false);
   });
 
-  it("waits an initial delay before first status poll", async () => {
-    const sleeps: number[] = [];
+  it("treats DSM error 599 from status as transient and keeps polling", async () => {
+    let statusCalls = 0;
     const client = {
       hostname: "nas01",
       request: vi.fn(async (_api: string, method: string) => {
         if (method === "start") return { taskid: "t" };
-        if (method === "status") return { finished: true, md5: "abc" };
+        if (method === "status") {
+          statusCalls += 1;
+          if (statusCalls < 3) {
+            // DSM returns 599 while a prior task still occupies the session — recoverable.
+            throw new Error("DSM error 599 on SYNO.FileStation.MD5/status for nas01");
+          }
+          return { finished: true, md5: "feedface" };
+        }
         return {};
       }),
     };
-    await handleFileStationTool(
+    const result = await handleFileStationTool(
       "synology_share_file_md5",
       { host: "nas01", share: "software", path: "x" },
-      {
-        clientFor: async () => client as never,
-        sleepFn: async (ms: number) => {
-          sleeps.push(ms);
-        },
-      },
+      { clientFor: async () => client as never, sleepFn: async () => {} },
     );
-    // First sleep should be the initial delay (≥1000ms) before any status poll.
-    expect(sleeps.length).toBeGreaterThan(0);
-    expect(sleeps[0]).toBeGreaterThanOrEqual(1000);
+    expect(result.isError).toBeUndefined();
+    expect(JSON.parse(result.content[0]!.text)).toEqual({ md5: "feedface" });
+    expect(statusCalls).toBe(3);
   });
 
   it("normalizes both relative and absolute path forms in start", async () => {
