@@ -153,10 +153,11 @@ function isMissingFileError(err: unknown): boolean {
 
 function octalMode(perm: number | undefined): string {
   if (perm === undefined) return "";
-  // DSM returns posix perm as decimal of octal digits (e.g. 755 as number 493 in some builds, or 755 as 755).
-  // Best effort: if value <= 0o777 treat as already-octal int; otherwise toString(8).
-  if (perm <= 0o777) return perm.toString(8).padStart(3, "0");
-  return (perm & 0o777).toString(8).padStart(3, "0");
+  // DSM 7.x returns posix perm as the literal decimal of the octal digits — i.e. 0o755 is sent as
+  // the integer 755 (NOT 0o755 = 493). Verified live against DSM 7.2 on 2026-05-03 (#12 v2 probe):
+  // a 0o777 file came back as `posix: 777`.
+  // We render the value as-is, zero-padded to 3 digits.
+  return String(perm).padStart(3, "0");
 }
 
 function globToRegex(glob: string): RegExp {
@@ -175,14 +176,19 @@ export async function handleFileStationTool(
       const fullPath = buildPath(share, path);
       const client = await ctx.clientFor(host);
       try {
-        // DSM 7.x SYNO.FileStation.Info uses method=get (DSM 5.x used getinfo).
-        const data = await client.request<FileStationGetInfoResp>("SYNO.FileStation.Info", "get", {
+        // DSM 7.x: file stat is SYNO.FileStation.List method=getinfo.
+        // SYNO.FileStation.Info.get returns FileStation user-session info, NOT file info.
+        // Verified live against DSM 7.2 / nas01 on 2026-05-03 (#12 v2 probe).
+        const data = await client.request<FileStationGetInfoResp>("SYNO.FileStation.List", "getinfo", {
           version: 2,
           path: JSON.stringify([fullPath]),
           additional: JSON.stringify(["size", "time", "perm", "owner"]),
         });
         const entry = data.files?.[0];
-        if (!entry || (entry.path && entry.path !== fullPath && !entry.name)) {
+        // DSM 7.x `SYNO.FileStation.List.getinfo` does NOT raise an error for missing paths;
+        // it returns a placeholder entry with empty `name` and no `additional`. Treat that as
+        // not-found. Verified live against DSM 7.2 on 2026-05-03 (#12 v2 probe).
+        if (!entry || (!entry.name && !entry.additional)) {
           return { content: [{ type: "text", text: JSON.stringify({ exists: false }) }] };
         }
         const result = {
@@ -221,23 +227,38 @@ export async function handleFileStationTool(
         throw new Error(`MD5 task did not return a taskid for ${fullPath}`);
       }
 
-      const pollIntervalMs = 2000;
-      // DSM returns error 599 ("Unknown DSM error") if status is polled immediately
-      // after start — give the task time to register before the first poll.
-      const initialDelayMs = 1500;
-      await sleep(initialDelayMs);
+      const pollIntervalMs = 1000;
       const deadline = Date.now() + timeoutMs;
+      // DSM allows only ONE concurrent MD5 task per session. If a stale task is in flight,
+      // status polls return error 599 ("Unknown DSM error"). Treat 599 as transient: keep
+      // polling until either a real finished result or the timeout.
+      // Verified live against DSM 7.2 on 2026-05-03 (#12 v2 probe) — clean cycles complete
+      // in ~1s for a 72MB file.
+      let consecutive599 = 0;
+      const max599 = Math.max(10, Math.ceil(timeoutMs / pollIntervalMs));
       while (Date.now() < deadline) {
-        // Status poll MUST send only taskid (no path) — DSM rejects the path param here.
-        const status = await client.request<FileStationMd5StatusResp>("SYNO.FileStation.MD5", "status", {
-          version: 2,
-          taskid,
-        });
-        if (status.finished) {
-          if (!status.md5) {
-            throw new Error(`MD5 task ${taskid} reported finished but no md5 returned for ${fullPath}`);
+        try {
+          const status = await client.request<FileStationMd5StatusResp>("SYNO.FileStation.MD5", "status", {
+            version: 2,
+            taskid,
+          });
+          consecutive599 = 0;
+          if (status.finished) {
+            if (!status.md5) {
+              throw new Error(`MD5 task ${taskid} reported finished but no md5 returned for ${fullPath}`);
+            }
+            return { content: [{ type: "text", text: JSON.stringify({ md5: status.md5.toLowerCase() }) }] };
           }
-          return { content: [{ type: "text", text: JSON.stringify({ md5: status.md5.toLowerCase() }) }] };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (/DSM error 599/.test(msg)) {
+            consecutive599 += 1;
+            if (consecutive599 > max599) {
+              throw new Error(`MD5 task ${taskid} returned DSM error 599 repeatedly — another MD5 task may be in flight on this session`);
+            }
+          } else {
+            throw err;
+          }
         }
         await sleep(pollIntervalMs);
       }
