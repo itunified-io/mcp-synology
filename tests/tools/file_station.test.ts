@@ -59,7 +59,7 @@ describe("synology_share_file_stat", () => {
     });
     const [api, method, params] = client.request.mock.calls[0] as [string, string, Record<string, unknown>];
     expect(api).toBe("SYNO.FileStation.Info");
-    expect(method).toBe("getinfo");
+    expect(method).toBe("get");
     expect(params.version).toBe(2);
     expect(params.path).toBe(JSON.stringify(["/software/oracle/foo.zip"]));
   });
@@ -68,7 +68,7 @@ describe("synology_share_file_stat", () => {
     const client = {
       hostname: "nas01",
       request: vi.fn(async () => {
-        throw new Error("DSM error 408 on SYNO.FileStation.Info/getinfo for nas01");
+        throw new Error("DSM error 408 on SYNO.FileStation.Info/get for nas01");
       }),
     };
     const result = await handleFileStationTool(
@@ -97,6 +97,31 @@ describe("synology_share_file_stat", () => {
       { clientFor: vi.fn() } as never,
     );
     expect(result.isError).toBe(true);
+  });
+
+  it("normalizes both relative and absolute path forms", async () => {
+    const calls: string[] = [];
+    const client = {
+      hostname: "nas01",
+      request: vi.fn(async (_api: string, _method: string, params: Record<string, unknown>) => {
+        calls.push(params.path as string);
+        return { files: [] };
+      }),
+    };
+    await handleFileStationTool(
+      "synology_share_file_stat",
+      { host: "nas01", share: "software", path: "oracle/19/foo.zip" },
+      { clientFor: async () => client as never },
+    );
+    await handleFileStationTool(
+      "synology_share_file_stat",
+      { host: "nas01", share: "software", path: "/software/oracle/19/foo.zip" },
+      { clientFor: async () => client as never },
+    );
+    expect(calls).toEqual([
+      JSON.stringify(["/software/oracle/19/foo.zip"]),
+      JSON.stringify(["/software/oracle/19/foo.zip"]),
+    ]);
   });
 });
 
@@ -128,6 +153,85 @@ describe("synology_share_file_md5", () => {
     });
     expect(calls[0]).toEqual({ api: "SYNO.FileStation.MD5", method: "start" });
     expect(calls.filter((c) => c.method === "status").length).toBe(3);
+  });
+
+  it("status poll sends only taskid + version (no path)", async () => {
+    const statusCalls: Array<Record<string, unknown>> = [];
+    const client = {
+      hostname: "nas01",
+      request: vi.fn(async (_api: string, method: string, params: Record<string, unknown>) => {
+        if (method === "start") return { taskid: "task-xyz" };
+        if (method === "status") {
+          statusCalls.push(params);
+          return { finished: true, md5: "deadbeef" };
+        }
+        return {};
+      }),
+    };
+    await handleFileStationTool(
+      "synology_share_file_md5",
+      { host: "nas01", share: "software", path: "oracle/19/foo.zip" },
+      { clientFor: async () => client as never, sleepFn: async () => {} },
+    );
+    expect(statusCalls.length).toBeGreaterThan(0);
+    const first = statusCalls[0]!;
+    expect(first.taskid).toBe("task-xyz");
+    expect(first.version).toBe(2);
+    // Status MUST NOT include path / file_path (DSM rejects with 599).
+    expect("path" in first).toBe(false);
+    expect("file_path" in first).toBe(false);
+  });
+
+  it("waits an initial delay before first status poll", async () => {
+    const sleeps: number[] = [];
+    const client = {
+      hostname: "nas01",
+      request: vi.fn(async (_api: string, method: string) => {
+        if (method === "start") return { taskid: "t" };
+        if (method === "status") return { finished: true, md5: "abc" };
+        return {};
+      }),
+    };
+    await handleFileStationTool(
+      "synology_share_file_md5",
+      { host: "nas01", share: "software", path: "x" },
+      {
+        clientFor: async () => client as never,
+        sleepFn: async (ms: number) => {
+          sleeps.push(ms);
+        },
+      },
+    );
+    // First sleep should be the initial delay (≥1000ms) before any status poll.
+    expect(sleeps.length).toBeGreaterThan(0);
+    expect(sleeps[0]).toBeGreaterThanOrEqual(1000);
+  });
+
+  it("normalizes both relative and absolute path forms in start", async () => {
+    const startCalls: Array<Record<string, unknown>> = [];
+    const client = {
+      hostname: "nas01",
+      request: vi.fn(async (_api: string, method: string, params: Record<string, unknown>) => {
+        if (method === "start") {
+          startCalls.push(params);
+          return { taskid: "t" };
+        }
+        if (method === "status") return { finished: true, md5: "abc" };
+        return {};
+      }),
+    };
+    await handleFileStationTool(
+      "synology_share_file_md5",
+      { host: "nas01", share: "software", path: "oracle/19/foo.zip" },
+      { clientFor: async () => client as never, sleepFn: async () => {} },
+    );
+    await handleFileStationTool(
+      "synology_share_file_md5",
+      { host: "nas01", share: "software", path: "/software/oracle/19/foo.zip" },
+      { clientFor: async () => client as never, sleepFn: async () => {} },
+    );
+    expect(startCalls[0]!.file_path).toBe("/software/oracle/19/foo.zip");
+    expect(startCalls[1]!.file_path).toBe("/software/oracle/19/foo.zip");
   });
 
   it("times out and throws when status never finishes", async () => {
@@ -215,6 +319,28 @@ describe("synology_share_file_list", () => {
     expect(body.files.map((f: { name: string }) => f.name)).toEqual(["a.zip", "c.zip"]);
     const [, , params] = client.request.mock.calls[0] as [string, string, Record<string, unknown>];
     expect(params.pattern).toBe("*.zip");
+  });
+
+  it("normalizes both relative and absolute folder_path forms", async () => {
+    const calls: string[] = [];
+    const client = {
+      hostname: "nas01",
+      request: vi.fn(async (_api: string, _method: string, params: Record<string, unknown>) => {
+        calls.push(params.folder_path as string);
+        return { files: [] };
+      }),
+    };
+    await handleFileStationTool(
+      "synology_share_file_list",
+      { host: "nas01", share: "software", path: "oracle/19" },
+      { clientFor: async () => client as never },
+    );
+    await handleFileStationTool(
+      "synology_share_file_list",
+      { host: "nas01", share: "software", path: "/software/oracle/19" },
+      { clientFor: async () => client as never },
+    );
+    expect(calls).toEqual(["/software/oracle/19", "/software/oracle/19"]);
   });
 });
 
