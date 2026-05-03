@@ -2,6 +2,30 @@
 
 All notable changes to this project are documented here. Format: [CalVer](https://calver.org/) — `YYYY.MM.DD.N`.
 
+## v2026.5.3-2
+
+### Fixed: File Station path-handling bugs (#12)
+
+Three follow-up fixes to the v2026.5.3-1 File Station tools surfaced by
+infrastructure `/lab-preflight` Gap 2 hard-checks against `nas01` (DSM 7.x):
+
+1. **`synology_share_file_stat` used wrong DSM method name.** The tool called
+   `SYNO.FileStation.Info/getinfo`, which DSM 7.x rejects with error 103
+   ("method does not exist"). DSM 7.x uses `method=get`. Fixed.
+2. **`synology_share_file_md5` status poll returned DSM 599 on immediate poll.**
+   Added a 1500 ms initial delay between `start` and the first `status` request
+   so the MD5 task has time to register. The status request body already only
+   sent `taskid + version` (no path) — the fault was timing, not payload shape.
+3. **Path normalization is now explicitly tested as the contract.** Both forms
+   continue to work via `buildPath`: `oracle/19/foo.zip` (relative to share)
+   and `/software/oracle/19/foo.zip` (full DSM path). Added explicit
+   round-trip tests for all three tools (`stat`, `md5`, `list`).
+
+Added live-verify probe `scripts/probe-filestation.ts` for operators on the
+LAN (the dev Mac cannot reach `nas01:8443` directly through Tailscale).
+
+Tests: 17 → 20 in `file_station.test.ts` (82 total, all green).
+
 ## v2026.5.3-1
 
 ### Added: File Station read tools (#10) — lab-preflight Gap 2

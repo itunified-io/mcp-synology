@@ -175,7 +175,8 @@ export async function handleFileStationTool(
       const fullPath = buildPath(share, path);
       const client = await ctx.clientFor(host);
       try {
-        const data = await client.request<FileStationGetInfoResp>("SYNO.FileStation.Info", "getinfo", {
+        // DSM 7.x SYNO.FileStation.Info uses method=get (DSM 5.x used getinfo).
+        const data = await client.request<FileStationGetInfoResp>("SYNO.FileStation.Info", "get", {
           version: 2,
           path: JSON.stringify([fullPath]),
           additional: JSON.stringify(["size", "time", "perm", "owner"]),
@@ -221,8 +222,13 @@ export async function handleFileStationTool(
       }
 
       const pollIntervalMs = 2000;
+      // DSM returns error 599 ("Unknown DSM error") if status is polled immediately
+      // after start — give the task time to register before the first poll.
+      const initialDelayMs = 1500;
+      await sleep(initialDelayMs);
       const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {
+        // Status poll MUST send only taskid (no path) — DSM rejects the path param here.
         const status = await client.request<FileStationMd5StatusResp>("SYNO.FileStation.MD5", "status", {
           version: 2,
           taskid,
