@@ -3,7 +3,7 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![npm](https://img.shields.io/npm/v/@itunified.io/mcp-synology.svg)](https://www.npmjs.com/package/@itunified.io/mcp-synology)
 
-Read-only MCP server for **Synology DSM** with 19 tools across iSCSI, shares, volumes, snapshots, users, system health. Multi-host. DSM Web API.
+Read-only MCP server for **Synology DSM** with 22 tools across iSCSI, shares, volumes, snapshots, users, system health, and File Station. Multi-host. DSM Web API.
 
 ## Install
 
@@ -50,6 +50,9 @@ Not supported in Phase 1 — use Vault. Future release will add env fallback.
 | `synology_diag_disk_health` | Per-disk health via HddMan |
 | `synology_diag_smart` | SMART attributes per disk |
 | `synology_diag_log_tail` | Tail N lines from DSM system log |
+| `synology_share_file_stat` | Stat a file/dir under a share (size, mtime, mode, owner, isdir) — returns `{exists:false}` for missing paths |
+| `synology_share_file_md5` | Compute MD5 of a file under a share via async DSM task (default 300s timeout) |
+| `synology_share_file_list` | List directory contents under a share with optional glob pattern filter |
 
 ## MCP client config (Claude Desktop)
 

@@ -15,6 +15,7 @@ import { iscsiToolDefinitions, handleIscsiTool } from "./tools/iscsi.js";
 import { snapshotsToolDefinitions, handleSnapshotsTool } from "./tools/snapshots.js";
 import { packagesToolDefinitions, handlePackagesTool } from "./tools/packages.js";
 import { diagToolDefinitions, handleDiagTool } from "./tools/diag.js";
+import { fileStationToolDefinitions, handleFileStationTool } from "./tools/file_station.js";
 
 export const ALL_TOOL_DEFINITIONS = [
   ...hostsToolDefinitions,
@@ -27,6 +28,7 @@ export const ALL_TOOL_DEFINITIONS = [
   ...snapshotsToolDefinitions,
   ...packagesToolDefinitions,
   ...diagToolDefinitions,
+  ...fileStationToolDefinitions,
 ];
 
 // Only run server when invoked as main, not when imported by tests.
@@ -49,7 +51,7 @@ if (isMain) {
     DsmClient.forHost(hostname, { registry });
 
   const server = new Server(
-    { name: "mcp-synology", version: "2026.4.23-1" },
+    { name: "mcp-synology", version: "2026.5.3-1" },
     { capabilities: { tools: {} } },
   );
 
@@ -71,6 +73,7 @@ if (isMain) {
       if (snapshotsToolDefinitions.some((t) => t.name === name)) return handleSnapshotsTool(name, args, { clientFor });
       if (packagesToolDefinitions.some((t) => t.name === name)) return handlePackagesTool(name, args, { clientFor });
       if (diagToolDefinitions.some((t) => t.name === name)) return handleDiagTool(name, args, { clientFor });
+      if (fileStationToolDefinitions.some((t) => t.name === name)) return handleFileStationTool(name, args, { clientFor });
       return { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true };
     };
     const result = await run();
