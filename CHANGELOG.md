@@ -2,6 +2,26 @@
 
 All notable changes to this project are documented here. Format: [CalVer](https://calver.org/) — `YYYY.MM.DD.N`.
 
+## v2026.5.3-1
+
+### Added: File Station read tools (#10) — lab-preflight Gap 2
+
+Three new tools wrapping DSM `SYNO.FileStation.*` for read-only file inspection
+under any DSM share:
+
+- `synology_share_file_stat` — stat a file/directory; returns `{exists:false}`
+  cleanly on miss (DSM error 408/400/414/417), so callers can branch without try/catch.
+- `synology_share_file_md5` — async MD5 computation via `start` + poll `status`
+  (default 300s timeout, max 3600s) — handles multi-GB Oracle binaries.
+- `synology_share_file_list` — directory listing with optional glob pattern
+  (server-side `pattern` param + client-side fallback filter).
+
+Used by the infrastructure repo's `/lab-preflight` skill to hard-verify Oracle
+19c binary integrity on `//nas01/software` before Phase D installs (replaces
+the previous soft-skip behaviour).
+
+Tool count: 19 → 22.
+
 ## v2026.4.28-1
 
 ### Fixed: synology_iscsi_initiator_acl_list returned no ACL data on DSM 7.x (#9)
